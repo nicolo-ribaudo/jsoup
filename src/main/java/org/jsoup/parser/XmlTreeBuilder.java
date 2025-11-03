@@ -253,29 +253,14 @@ public class XmlTreeBuilder extends TreeBuilder {
      * @param endTag tag to close
      */
     protected void popStackToClose(Token.EndTag endTag) {
-        // like in HtmlTreeBuilder - don't scan up forever for very (artificially) deeply nested stacks
         String elName = settings.normalizeTag(endTag.name());
-        Element firstFound = null;
+        int lastIndex = stack.lastIndexOfType(elName);
 
-        final int bottom = stack.size() - 1;
-        final int upper = bottom >= maxQueueDepth ? bottom - maxQueueDepth : 0;
-
-        for (int pos = stack.size() -1; pos >= upper; pos--) {
-            Element next = stack.get(pos);
-            if (next.nodeName().equals(elName)) {
-                firstFound = next;
-                break;
-            }
-        }
-        if (firstFound == null)
+        if (lastIndex == -1)
             return; // not found, skip
 
-        for (int pos = stack.size() -1; pos >= 0; pos--) {
-            Element next = pop();
-            if (next == firstFound) {
-                break;
-            }
+        for (int pos = stack.size() -1; pos >= lastIndex; pos--) {
+            pop();
         }
     }
-    private static final int maxQueueDepth = 256; // an arbitrary tension point between real XML and crafted pain
 }

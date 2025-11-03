@@ -27,7 +27,7 @@ abstract class TreeBuilder {
     CharacterReader reader;
     Tokeniser tokeniser;
     Document doc; // current doc we are building into
-    ArrayList<Element> stack; // the stack of open elements
+    TreeBuilderStack stack; // the stack of open elements
     String baseUri; // current base uri, for creating new elements
     Token currentToken; // currentToken is used for error and source position tracking. Null at start of fragment parse
     ParseSettings settings;
@@ -54,7 +54,7 @@ abstract class TreeBuilder {
         reader.trackNewlines(parser.isTrackErrors() || trackSourceRange); // when tracking errors or source ranges, enable newline tracking for better legibility
         if (parser.isTrackErrors()) parser.getErrors().clear();
         tokeniser = new Tokeniser(this);
-        stack = new ArrayList<>(32);
+        stack = new TreeBuilderStack(settings);
         tagSet = parser.tagSet();
         start = new Token.StartTag(this);
         currentToken = start; // init current token to the virtual start token.
@@ -159,8 +159,7 @@ abstract class TreeBuilder {
      * @return
      */
     Element pop() {
-        int size = stack.size();
-        Element removed = stack.remove(size - 1);
+        Element removed = stack.pop();
         onNodeClosed(removed);
         return removed;
     }
@@ -170,7 +169,7 @@ abstract class TreeBuilder {
      * @param element
      */
     final void push(Element element) {
-        stack.add(element);
+        stack.push(element);
         onNodeInserted(element);
     }
 
@@ -180,8 +179,7 @@ abstract class TreeBuilder {
      @return the last element on the stack, if any; or the root document
      */
     Element currentElement() {
-        int size = stack.size();
-        return size > 0 ? stack.get(size-1) : doc;
+        return stack.isEmpty() ? doc : stack.last();
     }
 
     /**

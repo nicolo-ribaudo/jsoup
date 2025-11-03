@@ -60,6 +60,8 @@ public class HtmlTreeBuilder extends TreeBuilder {
         "button", "fieldset", "input", "keygen", "object", "output", "select", "textarea"
     };
 
+    /** @deprecated This is not used anymore. Will be removed in a future release. */
+    @Deprecated
     public static final int MaxScopeSearchDepth = 100; // prevents the parser bogging down in exceptionally broken pages
 
     private HtmlTreeBuilderState state; // the current state
@@ -440,12 +442,12 @@ public class HtmlTreeBuilder extends TreeBuilder {
         onNodeInserted(node);
     }
 
-    ArrayList<Element> getStack() {
+    TreeBuilderStack getStack() {
         return stack;
     }
 
     boolean onStack(Element el) {
-        return onStack(stack, el);
+        return stack.lastIndexOf(el) != -1;
     }
 
     /** Checks if there is an HTML element with the given name on the stack. */
@@ -469,33 +471,17 @@ public class HtmlTreeBuilder extends TreeBuilder {
     /** Gets the nearest (lowest) HTML element with the given name from the stack. */
     @Nullable
     Element getFromStack(String elName) {
-        final int bottom = stack.size() - 1;
-        final int upper = bottom >= maxQueueDepth ? bottom - maxQueueDepth : 0;
-        for (int pos = bottom; pos >= upper; pos--) {
-            Element next = stack.get(pos);
-            if (next.elementIs(elName, NamespaceHtml)) {
-                return next;
-            }
-        }
-        return null;
+        return stack.lastOfType(elName, NamespaceHtml);
     }
 
     boolean removeFromStack(Element el) {
-        for (int pos = stack.size() -1; pos >= 0; pos--) {
-            Element next = stack.get(pos);
-            if (next == el) {
-                stack.remove(pos);
-                onNodeClosed(el);
-                return true;
-            }
-        }
-        return false;
+        return stack.remove(el);
     }
 
     /** Pops the stack until the given HTML element is removed. */
     @Nullable
     Element popStackToClose(String elName) {
-        for (int pos = stack.size() -1; pos >= 0; pos--) {
+        while (!stack.isEmpty()) {
             Element el = pop();
             if (el.elementIs(elName, NamespaceHtml)) {
                 return el;
@@ -507,7 +493,7 @@ public class HtmlTreeBuilder extends TreeBuilder {
     /** Pops the stack until an element with the supplied name is removed, irrespective of namespace. */
     @Nullable
     Element popStackToCloseAnyNamespace(String elName) {
-        for (int pos = stack.size() -1; pos >= 0; pos--) {
+        while (!stack.isEmpty()) {
             Element el = pop();
             if (el.nameIs(elName)) {
                 return el;
@@ -518,7 +504,7 @@ public class HtmlTreeBuilder extends TreeBuilder {
 
     /** Pops the stack until one of the given HTML elements is removed. */
     void popStackToClose(String... elNames) { // elnames is sorted, comes from Constants
-        for (int pos = stack.size() -1; pos >= 0; pos--) {
+        while (!stack.isEmpty()) {
             Element el = pop();
             if (inSorted(el.normalName(), elNames) && NamespaceHtml.equals(el.tag().namespace())) {
                 break;
@@ -540,13 +526,14 @@ public class HtmlTreeBuilder extends TreeBuilder {
 
     /** Removes elements from the stack until one of the supplied HTML elements is removed. */
     private void clearStackToContext(String... nodeNames) {
-        for (int pos = stack.size() -1; pos >= 0; pos--) {
-            Element next = stack.get(pos);
+        while (!stack.isEmpty()) {
+            Element next = stack.last();
             if (NamespaceHtml.equals(next.tag().namespace()) &&
                 (StringUtil.in(next.normalName(), nodeNames) || next.nameIs("html")))
                 break;
             else
-                pop();
+                stack.pop();
+
         }
     }
 
@@ -558,35 +545,22 @@ public class HtmlTreeBuilder extends TreeBuilder {
      @return the Element immediately above the supplied element, or null if there is no such element.
      */
     @Nullable Element aboveOnStack(Element el) {
-        if (!onStack(el)) return null;
-        for (int pos = stack.size() -1; pos > 0; pos--) {
-            Element next = stack.get(pos);
-            if (next == el) {
-                return stack.get(pos-1);
-            }
-        }
-        return null;
+        return stack.above(el);
     }
 
     void insertOnStackAfter(Element after, Element in) {
         int i = stack.lastIndexOf(after);
         if (i == -1) {
             error("Did not find element on stack to insert after");
-            stack.add(in);
+            stack.push(in);
             // may happen on particularly malformed inputs during adoption
         } else {
-            stack.add(i+1, in);
+            stack.insertAt(i+1, in);
         }
     }
 
     void replaceOnStack(Element out, Element in) {
-        replaceInQueue(stack, out, in);
-    }
-
-    private static void replaceInQueue(ArrayList<Element> queue, Element out, Element in) {
-        int i = queue.lastIndexOf(out);
-        Validate.isTrue(i != -1);
-        queue.set(i, in);
+        stack.replace(out, in);
     }
 
     /**
@@ -677,7 +651,7 @@ public class HtmlTreeBuilder extends TreeBuilder {
     /** Places the body back onto the stack and moves to InBody, for cases in AfterBody / AfterAfterBody when more content comes */
     void resetBody() {
         if (!onStack("body")) {
-            stack.add(doc.body()); // not onNodeInserted, as already seen
+            stack.push(doc.body()); // not onNodeInserted, as already seen
         }
         transition(HtmlTreeBuilderState.InBody);
     }
@@ -692,30 +666,32 @@ public class HtmlTreeBuilder extends TreeBuilder {
 
     private boolean inSpecificScope(String[] targetNames, String[] baseTypes, @Nullable String[] extraTypes) {
         // https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-the-specific-scope
-        final int bottom = stack.size() -1;
-        final int top = bottom > MaxScopeSearchDepth ? bottom - MaxScopeSearchDepth : 0;
-        // don't walk too far up the tree
-        for (int pos = bottom; pos >= top; pos--) {
-            Element el = stack.get(pos);
-            String elName = el.normalName();
-            // namespace checks - arguments provided are always in html ns, with this bolt-on for math and svg:
-            String ns = el.tag().namespace();
-            if (ns.equals(NamespaceHtml)) {
-                if (inSorted(elName, targetNames))
-                    return true;
-                if (inSorted(elName, baseTypes))
-                    return false;
-                if (extraTypes != null && inSorted(elName, extraTypes))
-                    return false;
-            } else if (baseTypes == TagsSearchInScope) {
-                if (ns.equals(NamespaceMathml) && inSorted(elName, TagSearchInScopeMath))
-                    return false;
-                if (ns.equals(NamespaceSvg) && inSorted(elName, TagSearchInScopeSvg))
-                    return false;
+
+        int lastTargetNameIndex = -1;
+        for (String targetName : targetNames) {
+            lastTargetNameIndex = Math.max(lastTargetNameIndex, stack.lastIndexOfType(targetName));
+        }
+
+        int lastBaseTypeIndex = -1;
+        for (String baseType : baseTypes) {
+            lastBaseTypeIndex = Math.max(lastBaseTypeIndex, stack.lastIndexOfType(baseType));
+        }
+        if (lastBaseTypeIndex > lastTargetNameIndex) {
+            return false;
+        }
+
+        if (extraTypes != null) {
+            int lastExtraTypeIndex = -1;
+            for (String extraType : extraTypes) {
+                lastExtraTypeIndex = Math.max(lastExtraTypeIndex, stack.lastIndexOfType(extraType));
+            }
+            if (lastExtraTypeIndex > lastTargetNameIndex) {
+                return false;
             }
         }
-        //Validate.fail("Should not be reachable"); // would end up false because hitting 'html' at root (basetypes)
-        return false;
+
+        // TODO: MathML and SVG
+        return lastTargetNameIndex != -1;
     }
 
     boolean inScope(String[] targetNames) {
@@ -756,16 +732,7 @@ public class HtmlTreeBuilder extends TreeBuilder {
 
     /** Tests if there is some element on the stack that is not in the provided set. */
     boolean onStackNot(String[] allowedTags) {
-        final int bottom = stack.size() -1;
-        final int top = bottom > MaxScopeSearchDepth ? bottom - MaxScopeSearchDepth : 0;
-        // don't walk too far up the tree
-
-        for (int pos = bottom; pos >= top; pos--) {
-            final String elName = stack.get(pos).normalName();
-            if (!inSorted(elName, allowedTags))
-                return true;
-        }
-        return false;
+        return stack.hasOfTypeNot(allowedTags);
     }
 
     void setHeadElement(Element headElement) {
@@ -1002,7 +969,9 @@ public class HtmlTreeBuilder extends TreeBuilder {
     }
 
     void replaceActiveFormattingElement(Element out, Element in) {
-        replaceInQueue(formattingElements, out, in);
+        int i = formattingElements.lastIndexOf(out);
+        Validate.isTrue(i != -1);
+        formattingElements.set(i, in);
     }
 
     void insertMarkerToFormattingElements() {

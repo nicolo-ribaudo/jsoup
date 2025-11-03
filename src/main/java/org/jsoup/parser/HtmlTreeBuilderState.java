@@ -324,7 +324,7 @@ enum HtmlTreeBuilderState {
         private boolean inBodyStartTag(Token t, HtmlTreeBuilder tb) {
             final Token.StartTag startTag = t.asStartTag();
             final String name = startTag.normalName();
-            final ArrayList<Element> stack;
+            final TreeBuilderStack stack;
             Element el;
 
             switch (name) {
@@ -403,7 +403,7 @@ enum HtmlTreeBuilderState {
                             second.remove();
                         // pop up to html element
                         while (stack.size() > 1)
-                            stack.remove(stack.size() - 1);
+                            stack.pop();
                         tb.insertElementFor(startTag);
                         tb.transition(InFrameset);
                     }
@@ -797,7 +797,7 @@ enum HtmlTreeBuilderState {
 
         boolean anyOtherEndTag(Token t, HtmlTreeBuilder tb) {
             final String name = t.asEndTag().normalName; // case insensitive search - goal is to preserve output case, not for the parse to be case sensitive
-            final ArrayList<Element> stack = tb.getStack();
+            final TreeBuilderStack stack = tb.getStack();
 
             // deviate from spec slightly to speed when super deeply nested
             Element elFromStack = tb.getFromStack(name);
@@ -879,7 +879,7 @@ enum HtmlTreeBuilderState {
 
                 //  7. Let furthestBlock be the topmost node in the [stack of open elements] that is lower in the stack than formattingElement, and is an element in the [special]category. There might not be one.
                 Element furthestBlock = null;
-                ArrayList<Element> stack = tb.getStack();
+                TreeBuilderStack stack = tb.getStack();
                 int fei = stack.lastIndexOf(formatEl);
                 if (fei != -1) { // look down the stack
                     for (int i = fei + 1; i < stack.size(); i++) {
@@ -1827,7 +1827,7 @@ enum HtmlTreeBuilderState {
                     }
 
                     // Any other end tag
-                    ArrayList<Element> stack = tb.getStack();
+                    TreeBuilderStack stack = tb.getStack();
                     if (stack.isEmpty())
                         Validate.wtf("Stack unexpectedly empty");
                     int i = stack.size() - 1;
